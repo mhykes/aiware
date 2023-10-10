@@ -2,10 +2,11 @@ import { PromptTemplate } from "langchain/prompts";
 import { ConversationalRetrievalQAChain } from "langchain/chains";
 import { ChatOpenAI } from "langchain/chat_models/openai";
 import { OpenAIEmbeddings } from "langchain/embeddings/openai";
-import { createVectorStore } from "./providers/prismaVec";
+import { createVectorStore } from "./providers/sqliteVec";
 import readline from "readline";
 import { CallbackManager } from "langchain/callbacks";
 import { BufferWindowMemory, ChatMessageHistory } from "langchain/memory";
+import { Metadata } from "./types";
 import { appendFile } from "fs";
 import { doDirtyWork } from "./dirtyWork";
 
@@ -49,7 +50,7 @@ const memory = new BufferWindowMemory({
   inputKey: "question",
 });
 
-export async function runQALoop(metadata) {
+export async function runQALoop(m: Metadata) {
   for (;;) {
     let skipEval = false;
     const question = await new Promise<string>((resolve) => {
@@ -79,26 +80,27 @@ export async function runQALoop(metadata) {
         log(token);
       };
   
-      await askQuestion(sanitizedQuestion, onNewToken);
-      await runQALoop(metadata);  
+      await askQuestion(sanitizedQuestion, onNewToken, m);
+      await runQALoop(m);  
     }
   }
 }
 
 export async function askQuestion(
   question: string,
-  onNewToken: (token: string) => void
+  onNewToken: (token: string) => void,
+  m: Metadata
 ) {
   const sanitizedQuestion = question.trim().replace("\n", " ");
 
-  const chain = getChatVectorChain(onNewToken);
+  const chain = getChatVectorChain(onNewToken, m);
   await chain.call({
     question: sanitizedQuestion,
     chat_history: chatHistory,
   });
 }
 
-function getChatVectorChain(onNewToken: (token: string) => void) {
+function getChatVectorChain(onNewToken: (token: string) => void, m: Metadata) {
   const embeddings = new OpenAIEmbeddings({
     modelName: "text-embedding-ada-002",
   });
