@@ -1,7 +1,7 @@
 import { Document } from "langchain/document";
 import { Metadata } from "./types";
 import { glob } from "glob";
-import { readFileSync } from "fs";
+import { readFile } from "fs/promises";
 import { RecursiveCharacterTextSplitter } from "langchain/text_splitter";
 import { addDocsToVectorstore } from "./providers/sqliteVec";
 import { parse } from "parse-gitignore";
@@ -18,36 +18,63 @@ export async function embedCodebase(
     }...`
   );
 
-  const ignoredExtensions = [
+  const defaultIgnoredExtensions = [
     "tsbuildinfo",
     "sh",
     "svg",
     "webmanifest",
     "png",
     "ico",
+    "cur",
     "gif",
+    "jpg",
+    "jpeg",
     "xml",
+    "otf",
+    "woff",
     "woff2",
+    "ttf",
+    "eot",
     "riv",
     "toml",
     "txt"
+  ];
+  
+  const configuredIgnoredExtensions: string[] = (process.env?.IGNORED_EXTENSIONS || "").split(',');
+  
+  const ignoredExtensions: string[] = [... new Set([ 
+    ...defaultIgnoredExtensions, 
+    ...configuredIgnoredExtensions])
   ].map((e) => `**/*.${e}`);
 
   const gitignore = parse(join(m.repoPath, ".gitignore")).patterns;
 
+  const defaultIgnoredPaths = [
+    "node_modules",
+    "node_modules/**",
+    "vendor",
+    "vendor/**",
+    ".git",
+    ".git/**",
+    "pnpm-lock.yaml",
+    ".env",
+    ".env.*",
+    "dist",
+    "dist/**",
+    "**/bin",
+    "**/bin/**"
+  ]
+
+  const configuredIgnoredPaths: string[] = (process.env?.IGNORED_PATHS || "").split(',');
+  
+  const ignoredPaths: string[] = [... new Set([ 
+    ...defaultIgnoredPaths, 
+    ...configuredIgnoredPaths])
+  ];
+
   const files = await glob("**/*", {
     ignore: [
-      // "node_modules",
-      // "node_modules/**",
-      ".git",
-      ".git/**",
-      "pnpm-lock.yaml",
-      ".env",
-      ".env.*",
-      "dist",
-      "dist/**",
-      "**/bin",
-      "**/bin/**",
+      ...ignoredPaths,
       ...gitignore,
       ...ignoredExtensions,
     ],
@@ -61,11 +88,15 @@ export async function embedCodebase(
     filesToEmbed = files.filter((f) => filePaths?.includes(f));
   }
 
+  console.log("======================================================");
   console.log(`Found ${filesToEmbed.length} files to embed`);
+  const typeStats = getTypeStats(filesToEmbed);
+  const typeStatsPairs = Object.keys(typeStats).map(key=>`${key}: ${typeStats[key]}`);
+  console.log(`File Types Found:  ${typeStatsPairs.join(',')}`);
 
   let exactFilePathsToEmbed = filesToEmbed.map((f) => `${m.repoPath}/${f}`);
 
-  const docs = getDocumentsForFilepaths(
+  const docs = await getDocumentsForFilepaths(
     m,
     exactFilePathsToEmbed,
     currentCommitHash
@@ -73,10 +104,22 @@ export async function embedCodebase(
   const splitDocs = await splitDocuments(docs);
 
   console.log(`Split ${docs.length} docs into ${splitDocs.length} docs`);
+  console.log("======================================================");
+
 
   await addDocsToVectorstore(splitDocs);
+  console.log("======================================================\n");
 }
 
+function getTypeStats(files: String[]): Object {
+  let stats = {};
+  for (const file of files) {
+    const fileExtension = file.split(".").pop() ?? "";
+    if(!Object.keys(stats).includes(fileExtension)) { stats[fileExtension] = 0 }
+    stats[fileExtension]++;
+  }
+  return stats;
+}
 
 async function splitDocuments(docs: Document[]) {
   const splitDocs: Document[] = [];
@@ -124,15 +167,25 @@ function hasNullBytes(buffer: Buffer): boolean {
   return false;
 }
 
-function getDocumentsForFilepaths(
+async function getDocumentsForFilepaths(
   m: Metadata,
   exactFilePaths: string[],
   currentCommitHash: string
 ) {
   const docs: Document[] = [];
-  for (const exactFilePath of exactFilePaths) {
+  const count = exactFilePaths.length;
+  let lastPct = 0;
+  for (let i = 0; i < count; i++) {
+    const exactFilePath = exactFilePaths[i];
+
+    const pct = Math.trunc(i/count*100);
+    if (pct % 10 == 0 && pct != lastPct) { 
+      console.log(`${pct}%`); 
+      lastPct = pct;
+    }
+
     try {
-      let buffer = readFileSync(exactFilePath);
+      let buffer = await readFile(exactFilePath);
       let pageContent = buffer.toString();
 
       pageContent = pageContent.replaceAll("\u0000", "");
@@ -153,9 +206,10 @@ function getDocumentsForFilepaths(
 
       docs.push(doc);
     } catch {
-      console.log("SKIPPING: ",exactFilePath); //MBH
+      console.log("SKIPPING: ",exactFilePath);
     }
   }
-
+  console.log('DONE!');
   return docs;
 }
+
