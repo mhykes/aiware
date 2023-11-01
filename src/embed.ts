@@ -20,24 +20,21 @@ export async function embedCodebase(
 
   const defaultIgnoredExtensions = [
     "tsbuildinfo",
-    "sh",
-    "svg",
     "webmanifest",
+    "svg",
     "png",
-    "ico",
-    "cur",
     "gif",
     "jpg",
     "jpeg",
-    "xml",
+    "ico",
+    "cur",
     "otf",
     "woff",
     "woff2",
     "ttf",
     "eot",
     "riv",
-    "toml",
-    "txt"
+    "toml"
   ];
   
   const configuredIgnoredExtensions: string[] = (process.env?.IGNORED_EXTENSIONS || "").split(',');
@@ -50,19 +47,14 @@ export async function embedCodebase(
   const gitignore = parse(join(m.repoPath, ".gitignore")).patterns;
 
   const defaultIgnoredPaths = [
-    "node_modules",
-    "node_modules/**",
-    "vendor",
-    "vendor/**",
     ".git",
     ".git/**",
     "pnpm-lock.yaml",
+    "package-lock.json",
     ".env",
     ".env.*",
     "dist",
-    "dist/**",
-    "**/bin",
-    "**/bin/**"
+    "dist/**"
   ]
 
   const configuredIgnoredPaths: string[] = (process.env?.IGNORED_PATHS || "").split(',');
